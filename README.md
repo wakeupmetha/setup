@@ -108,21 +108,44 @@ VERBOSE=1 sudo -E ./setup.sh
 
 Справа от анимации `ani` рисуется fastfetch с конфигом под сервер. Он же выводится по `ff`.
 
+Стиль — в духе [kraken-503/fastfetch-configs type1](https://github.com/kraken-503/fastfetch-configs/tree/master/type1): вместо подписей иконки Nerd Font, один акцентный цвет (жёлтый, `keyColor: 33`), группы разделены пустой строкой. Подписи не нужны — значения читаются сами.
+
 ```
-os      Ubuntu 24.04.3 LTS x86_64      docker  6 running / 8 total
-kernel  6.8.0-136-generic              node    remnanode up
-up      12 days, 4 hours               ufw     active, 11 rules
-shell   bash 5.2.21                    f2b     3 banned now / 47 total
-pkgs    812 (dpkg)                     logins  188.4.2.1   Jul 28 19:02
-cpu     AMD EPYC 7443 (4)                      93.72.10.5  Jul 27 08:44
-load    0.08 0.11 0.09                 updates 7 pending, 3 security
-ram     1.94 GiB / 7.76 GiB (25%)      reboot  REQUIRED - new kernel staged
-swap    disabled
-disk    18 GiB / 78 GiB (23%)
-lan     10.0.0.5
-wan     5.181.x.x
-geo     Tallinn, EE - AS47583 Hostinger
+   root@v70139
+
+   Ubuntu 24.04.3 LTS x86_64
+   6.8.0-136-generic
+   12 days, 4 hours
+   bash 5.2.21
+   812 (dpkg)
+
+   AMD EPYC 7443 (4) @ 2.85 GHz
+   0.08 0.11 0.09
+   1.94 GiB / 7.76 GiB (25%)
+   disabled
+   18 GiB / 78 GiB (23%)
+
+   10.0.0.5
+   5.181.x.x
+   Tallinn, EE - AS47583 Hostinger
+
+   6 running / 8 total
+   remnanode up
+   active, 11 rules
+   3 banned now / 47 total
+
+   188.4.2.1   Jul 28 19:02
+   93.72.10.5  Jul 27 08:44
+
+   7 pending, 3 security
+   REQUIRED - new kernel staged
 ```
+
+**Нужен Nerd Font в твоём локальном терминале.** Иконки рисует он, не сервер. Без шрифта вместо ключей будут квадратики — тут это критичнее, чем в обычных конфигах, потому что текстовых подписей нет вообще. Ставится с [nerdfonts.com](https://www.nerdfonts.com/font-downloads), подойдёт любой моноширинный.
+
+Глифы взяты из штатных пресетов fastfetch и type1 — не выдуманные кодпоинты, а те, что заведомо рендерятся.
+
+Хочешь ещё воздушнее, как в оригинальном type1 — добавь `"break"` после каждого модуля в `~/.config/fastfetch/config.jsonc`, а не только между группами. Панель станет вдвое выше, поэтому под `ani -H 30` по умолчанию сгруппировано.
 
 **Почему это не тормозит вход.** Публичный IP, город и счётчик обновлений — сетевые и медленные (`apt-get -s upgrade` ~1 сек). Они считаются раз в сутки таймером `vps-set-fetch-cache.timer` и складываются в `/var/cache/vps-set/fetch.env`, а панель их только читает. Всё остальное локальное и быстрое, команды помечены `parallel` и выполняются одновременно.
 

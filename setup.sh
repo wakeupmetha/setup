@@ -172,6 +172,7 @@ fetch_install() {
   step "chafa + ffmpeg" apt-get install -y -qq --no-install-recommends chafa ffmpeg
   step "anifetch" anifetch_pkg
   step "login panel + daily cache" fetch_panel
+  echo "  panel keys are Nerd Font glyphs — install one in your LOCAL terminal, or they render as boxes"
 
   # copy local gifs/videos into anifetch's asset dir — media only, the README in
   # there is documentation, not something to play
@@ -273,53 +274,131 @@ fastfetch_config() {
   cat > "$dir/config.jsonc" <<'EOF'
 {
   "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-  "logo": { "type": "none" },
+  "logo": {
+    "type": "none"
+  },
   "display": {
     "separator": "  ",
-    "key": { "width": 8 }
+    "color": {
+      "keys": "33"
+    },
+    "key": {
+      "width": 3
+    }
   },
   "modules": [
-    { "type": "title" },
-    "separator",
-
-    { "type": "os",       "key": "os" },
-    { "type": "kernel",   "key": "kernel" },
-    { "type": "uptime",   "key": "up" },
-    { "type": "shell",    "key": "shell" },
-    { "type": "terminal", "key": "term" },
-    { "type": "packages", "key": "pkgs" },
+    {
+      "type": "title",
+      "key": "",
+      "format": "{user-name}@{host-name}"
+    },
     "break",
-
-    { "type": "cpu",     "key": "cpu" },
-    { "type": "loadavg", "key": "load" },
-    { "type": "memory",  "key": "ram" },
-    { "type": "swap",    "key": "swap" },
-    { "type": "disk",    "key": "disk", "folders": "/" },
+    {
+      "type": "os",
+      "key": ""
+    },
+    {
+      "type": "kernel",
+      "key": ""
+    },
+    {
+      "type": "uptime",
+      "key": ""
+    },
+    {
+      "type": "shell",
+      "key": ""
+    },
+    {
+      "type": "packages",
+      "key": ""
+    },
     "break",
-
-    { "type": "localip", "key": "lan", "defaultRouteOnly": true, "showIpv6": false },
-    { "type": "command", "key": "wan", "parallel": true,
-      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; printf '%s' \"${PUBLIC_IP4:-n/a}\"; [ -n \"${PUBLIC_IP6:-}\" ] && printf '  %s' \"$PUBLIC_IP6\"; echo" },
-    { "type": "command", "key": "geo", "parallel": true,
-      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${CITY:-?}, ${COUNTRY:-?} - $(echo \"${ORG:-?}\" | cut -c1-28)\"" },
+    {
+      "type": "cpu",
+      "key": "󰉉"
+    },
+    {
+      "type": "loadavg",
+      "key": "󰍛"
+    },
+    {
+      "type": "memory",
+      "key": "󰩟"
+    },
+    {
+      "type": "swap",
+      "key": "󰩟"
+    },
+    {
+      "type": "disk",
+      "key": "",
+      "folders": "/"
+    },
     "break",
-
-    { "type": "command", "key": "docker", "parallel": true,
-      "text": "command -v docker >/dev/null || { echo 'not installed'; exit 0; }; r=$(docker ps -q 2>/dev/null | wc -l); t=$(docker ps -aq 2>/dev/null | wc -l); echo \"$r running / $t total\"" },
-    { "type": "command", "key": "node", "parallel": true,
-      "text": "docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode && echo 'remnanode up' || echo 'not deployed'" },
-    { "type": "command", "key": "ufw", "parallel": true,
-      "text": "s=$(ufw status 2>/dev/null | sed -n 's/^Status: //p'); n=$(ufw status numbered 2>/dev/null | grep -c '^\\['); echo \"${s:-no access}${n:+, $n rules}\"" },
-    { "type": "command", "key": "f2b", "parallel": true,
-      "text": "s=$(fail2ban-client status sshd 2>/dev/null) || { echo 'n/a'; exit 0; }; c=$(printf '%s' \"$s\" | sed -n 's/.*Currently banned:[[:space:]]*//p'); t=$(printf '%s' \"$s\" | sed -n 's/.*Total banned:[[:space:]]*//p'); echo \"${c:-0} banned now / ${t:-0} total\"" },
-    { "type": "command", "key": "logins", "parallel": true, "splitLines": true,
-      "text": "last -i -w -n 12 2>/dev/null | awk '$1!=\"reboot\" && $3 ~ /^[0-9]/ {printf \"%-15s %s %s %s\\n\", $3, $5, $6, $7}' | head -3" },
+    {
+      "type": "localip",
+      "key": "",
+      "defaultRouteOnly": true,
+      "showIpv6": false
+    },
+    {
+      "type": "command",
+      "key": "󰊢",
+      "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; printf '%s' \"${PUBLIC_IP4:-n/a}\"; [ -n \"${PUBLIC_IP6:-}\" ] && printf '  %s' \"$PUBLIC_IP6\"; echo"
+    },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${CITY:-?}, ${COUNTRY:-?} - $(echo \"${ORG:-?}\" | cut -c1-28)\""
+    },
     "break",
-
-    { "type": "command", "key": "updates", "parallel": true,
-      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${UPDATES:-?} pending, ${SECURITY:-0} security\"" },
-    { "type": "command", "key": "reboot",
-      "text": "[ -f /var/run/reboot-required ] && echo 'REQUIRED - new kernel or libs staged' || echo 'not needed'" },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "command -v docker >/dev/null || { echo 'not installed'; exit 0; }; r=$(docker ps -q 2>/dev/null | wc -l); t=$(docker ps -aq 2>/dev/null | wc -l); echo \"$r running / $t total\""
+    },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode && echo 'remnanode up' || echo 'not deployed'"
+    },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "s=$(ufw status 2>/dev/null | sed -n 's/^Status: //p'); n=$(ufw status numbered 2>/dev/null | grep -c '^\\['); echo \"${s:-no access}${n:+, $n rules}\""
+    },
+    {
+      "type": "command",
+      "key": "󰝚",
+      "parallel": true,
+      "text": "s=$(fail2ban-client status sshd 2>/dev/null) || { echo 'n/a'; exit 0; }; c=$(printf '%s' \"$s\" | sed -n 's/.*Currently banned:[[:space:]]*//p'); t=$(printf '%s' \"$s\" | sed -n 's/.*Total banned:[[:space:]]*//p'); echo \"${c:-0} banned now / ${t:-0} total\""
+    },
+    "break",
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "last -i -w -n 12 2>/dev/null | awk '$1!=\"reboot\" && $3 ~ /^[0-9]/ {printf \"%-15s %s %s %s\\n\", $3, $5, $6, $7}' | head -3",
+      "splitLines": true
+    },
+    "break",
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${UPDATES:-?} pending, ${SECURITY:-0} security\""
+    },
+    {
+      "type": "command",
+      "key": "󰅐",
+      "text": "[ -f /var/run/reboot-required ] && echo 'REQUIRED - new kernel or libs staged' || echo 'not needed'"
+    },
     "break",
     "colors"
   ]
