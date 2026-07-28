@@ -578,6 +578,15 @@ EOF
   echo "  meth-setup [section...]  — updates $SCRIPT_DIR and re-runs from anywhere"
 
   log "shortcuts -> /etc/profile.d/99-vps-set.sh"
+  # $ANI_FILE is set by the fetch section; running `shell` on its own must not wipe
+  # the animation, so recover it from the file we are about to overwrite.
+  if [ -z "$ANI_FILE" ]; then
+    ANI_FILE=$(sed -n 's/^ANIFETCH_FILE="\(.*\)"$/\1/p' /etc/profile.d/99-vps-set.sh 2>/dev/null) || true
+    # nothing configured yet: take the first asset, never prompt from here
+    [ -n "$ANI_FILE" ] \
+      || pick_animation "$TARGET_HOME/.local/share/anifetch/assets" </dev/null \
+      || true
+  fi
   printf '%s\n' "ANIFETCH_FILE=\"${ANI_FILE:-}\"" > /etc/profile.d/99-vps-set.sh
   cat >> /etc/profile.d/99-vps-set.sh <<'EOF'
 # --- vps-set shortcuts ---
