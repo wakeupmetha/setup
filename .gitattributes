@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# shell scripts run on linux — CRLF here means "bad interpreter: /bin/bash^M"
+*.sh text eol=lf

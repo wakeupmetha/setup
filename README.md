@@ -30,6 +30,32 @@ sudo ./setup.sh verify          # что стоит, чего нет
 
 После первого прогона — перелогиниться (или `source /etc/profile.d/99-vps-set.sh`), чтобы подхватились шорткаты и группа `docker`.
 
+Вывод apt не сыпется в терминал — только прогресс-бар, всё остальное пишется в `/var/log/vps-set.log`. При падении шага скрипт сам печатает последние 20 строк лога. Смотреть установку вживую:
+
+```bash
+VERBOSE=1 sudo -E ./setup.sh
+```
+
+Интерактивные сторонние установщики (motd, warp) под бар не заворачиваются — им нужен терминал для своих вопросов.
+
+### Переменные окружения
+
+| Переменная | Что |
+|---|---|
+| `SSH_EMAIL` | комментарий (почта) на GitHub-ключе; если не задана — спросит |
+| `GIT_NAME`, `GIT_EMAIL` | `git config --global user.name/user.email` |
+| `ANI_FILE` | какую гифку крутить в `ani` |
+| `PANEL_HOST` | хост панели: полный доступ + единственный источник для node API (`main-land.meth.ee`) |
+| `NODE_API_PORT` | порт node API, открывается только панели (`3000`) |
+| `NODE_PUBLIC_PORTS` | доп. VLESS-инбаунды сверх 80/443/2525, например `"8443 2053"` |
+| `NODE_UDP_PORTS` | udp-инбаунды (XHTTP/h3/hysteria), по умолчанию пусто |
+| `SELFSTEAL_PORT` | порт декоя caddy, проверяется на утечку и никогда не открывается (`9443`) |
+| `UFW_YES=1` | включить ufw без подтверждения (для неинтерактивных прогонов) |
+| `VERBOSE=1` | полный вывод вместо прогресс-бара |
+| `LOGFILE` | куда писать лог (по умолчанию `/var/log/vps-set.log`) |
+
+С `sudo` передавай через `-E`: `SSH_EMAIL=me@mail.com sudo -E ./setup.sh ssh`
+
 ## Секции
 
 | Секция | Дефолт | Что делает |
@@ -37,10 +63,15 @@ sudo ./setup.sh verify          # что стоит, чего нет
 | `base` | да | `apt update && upgrade`, curl/wget/git/htop/tmux/jq/unzip/rsync/tree/ncdu, net-tools/dnsutils/mtr/nmap, build-essential, ufw, fail2ban |
 | `docker` | да | docker-ce + cli + containerd + buildx + compose-plugin из официального репозитория, `systemctl enable --now docker`, добавляет юзера в группу `docker` |
 | `python` | да | python3, venv, pip, dev-headers, pipx + `pipx ensurepath` |
-| `fetch` | да | neofetch (fallback → fastfetch), chafa, ffmpeg, `pipx install anifetch`, копирует `assets/*` в `~/.local/share/anifetch/assets` |
+| `fetch` | да | neofetch (fallback → fastfetch), chafa, ffmpeg (`--no-install-recommends`, иначе тянет ~100 МБ mesa/gtk/vulkan, бесполезных на headless), `pipx install anifetch`, копирует `assets/*` в `~/.local/share/anifetch/assets` |
+| `speedtest` | да | [cloudflare-speed-cli](https://github.com/kavehtehrani/cloudflare-speed-cli) — статический musl-бинарь из релизов в `/usr/local/bin`, с проверкой sha256 |
 | `motd` | да | `toilet` + `toilet-fonts`, ставит [distillium/motd](https://github.com/distillium/motd) |
 | `shell` | да | пишет `/etc/profile.d/99-vps-set.sh` — шорткаты для всех юзеров |
-| `ssh` | да | ed25519-ключ для GitHub, `~/.ssh/config`, пин хост-ключей github.com, печатает pubkey |
+| `ssh` | да | ed25519-ключ для GitHub с почтой в комментарии, `~/.ssh/config`, пин хост-ключей github.com, печатает pubkey |
+| `firewall` | да | ufw под ноду: deny incoming/routed, 22 (limit) + 80/443/2525, node API только с IP панели, ufw-docker, суточный таймер резолва панели |
+| `sshd` | да, последней | вход только по ключам (`PasswordAuthentication no`), `PermitRootLogin prohibit-password`, fail2ban jail на порты живого sshd |
+| `node` | **нет** | проверка VLESS-пути после деплоя ноды: контейнеры, слушающие порты vs ufw, утечка декоя |
+| `crowdsec` | **нет** | crowdsec + iptables-bouncer, блоклисты сканеров |
 | `warp` | **нет** | [distillium/warp-native](https://github.com/distillium/warp-native) — Cloudflare WARP через WireGuard |
 | `remnawave` | **нет** | CLI-обёртки [DigneZzZ/remnawave-scripts](https://github.com/DigneZzZ/remnawave-scripts) в `/usr/local/bin` |
 | `verify` | — | проверка всего установленного, ненулевой exit если чего-то не хватает |
@@ -49,29 +80,50 @@ sudo ./setup.sh verify          # что стоит, чего нет
 
 | Команда | Что |
 |---|---|
-| `myip` | публичный IPv4 (ifconfig.me → ipify → локальный интерфейс) |
-| `myip -l` | адреса локальных интерфейсов |
-| `myip6` | публичный IPv6 |
+| `ip` | публичный IPv4 + IPv6 сервера |
+| `ip a`, `ip route`, `ip -6 addr …` | обычный iproute2, как был |
+| `ipv6` / `ipv6 off` / `ipv6 on` | статус / выключить / включить IPv6 (sysctl, переживает ребут) |
+| `ani` | anifetch с гифкой из `assets/` |
+| `ff` | neofetch (или fastfetch) |
+| `speedtest` | `cloudflare-speed-cli` — замер скорости через speed.cloudflare.com |
 | `ports` | `ss -tulpn` |
 | `update` | `apt update && apt upgrade` |
-| `ff` | neofetch (или fastfetch) |
-| `ani` | anifetch с гифкой из `assets/` |
 | `d` `dc` `dps` `dlog` | docker / docker compose / ps в таблицу / logs -f |
 | `ll` `..` `...` `df` `free` | обычные удобства |
 
-`ip` намеренно **не** переопределён — это бинарник iproute2, его перекрытие ломает систему (включая сам motd).
+**Про `ip`.** Это функция, а не алиас: без аргументов показывает внешние адреса, с любым аргументом уходит в `command ip "$@"`. То есть `ip a`, `ip route`, `ip link set …` работают как раньше. Скрипты и systemd-юниты вообще не задеты — функции из `/etc/profile.d` видны только интерактивным шеллам, motd и прочее продолжают звать настоящий бинарник.
+
+`ipv6 off` откажется работать, если ты сам подключён по IPv6 (иначе разорвёт сессию) — проверяется `$SSH_CONNECTION`. Продавить: `ipv6 off -f`. Выключение пишется в `/etc/sysctl.d/99-disable-ipv6.conf`, `ipv6 on` его удаляет.
 
 ### Анимация для `ani` (`fetch`)
 
-Положи `.gif` / `.mp4` в `assets/` до запуска — первый файл станет анимацией по умолчанию. Явно:
+Положи `.gif` / `.mp4` в `assets/` до запуска. Если файлов несколько — скрипт покажет меню:
+
+```
+Animation for `ani`:
+  1) shadow-shadow-the-hedgehog.mp4
+  2) playboi-carti.mp4
+  3) yeat-twizzyrich.mp4
+Choice [1-3, default 1]:
+```
+
+Один файл или неинтерактивный запуск — берётся первый, без вопросов. Задать сразу и пропустить меню:
 
 ```bash
 ANI_FILE=shadow.mp4 sudo -E ./setup.sh fetch shell
 ```
 
-Поменять потом — правь `ANIFETCH_FILE` в `/etc/profile.d/99-vps-set.sh`.
+Поменять потом — правь `ANIFETCH_FILE` в `/etc/profile.d/99-vps-set.sh` или прогони `sudo ./setup.sh fetch shell` ещё раз.
 
 ### GitHub-ключ (`ssh`)
+
+Комментарий на ключе (то, что GitHub показывает рядом с ним) спрашивается при запуске, либо задаётся заранее:
+
+```bash
+SSH_EMAIL=wakeupmetha@icloud.com sudo -E ./setup.sh ssh
+```
+
+Если ключ уже есть, он **не** перегенерится — но комментарий перепишется на новый (`ssh-keygen -c`), так что `root@v70139` меняется на почту без удаления ключа и повторного добавления на GitHub.
 
 Ключ генерится **без пароля** — иначе не работают unattended `git pull`. Добавить пароль: `ssh-keygen -p -f ~/.ssh/id_ed25519`.
 
@@ -84,6 +136,123 @@ GIT_NAME="Имя" GIT_EMAIL="mail@example.com" sudo -E ./setup.sh ssh
 ```
 
 Дальше: добавить pubkey на https://github.com/settings/ssh/new и проверить `ssh -T git@github.com`.
+
+### Firewall (`firewall`)
+
+Профиль под лёгкую ноду: remnanode + caddy selfsteal, всё в докере. Идёт предпоследней секцией — сначала всё ставится, потом закрывается. Спрашивает три вещи (Enter = дефолт):
+
+```
+Panel host [main-land.meth.ee]:
+Node API port, panel-only [3000]:
+Extra public ports (space separated) [none]:
+```
+
+Порядок: база ufw → фикс докера → фиксированные правила → параметризованные → резолв IP панели → таймер.
+
+**Политика**
+
+```
+default deny incoming
+default allow outgoing
+default deny routed
+```
+
+**Открыто всем**
+
+| Порт | Зачем |
+|---|---|
+| порт живого sshd (обычно 22) | `ufw limit` — >6 коннектов за 30 сек и IP улетает в дроп |
+| 80/tcp | ACME HTTP-01 / декой по http |
+| 443/tcp | **вход юзеров: Xray VLESS Reality** |
+| 2525/tcp | remnawave-web-backend, SMTP relay |
+| `NODE_PUBLIC_PORTS` | дополнительные VLESS-инбаунды конкретной ноды |
+| `NODE_UDP_PORTS` | udp-инбаунды, если используется XHTTP/h3/hysteria |
+
+Порт sshd не хардкожен — берётся из `sshd -T`. Переехал на 2222 — правило поедет за ним, а не отрежет тебя.
+
+```bash
+NODE_PUBLIC_PORTS="8443 2053" NODE_UDP_PORTS="443" sudo -E ./setup.sh firewall
+```
+
+**Что не открывается:** `SELFSTEAL_PORT` (по умолчанию 9443). Caddy-декой висит на `127.0.0.1:9443`, наружу его светит только Xray через Reality `dest`. Если этот порт станет доступен снаружи — тот же сертификат отвечает на двух портах, и маскировка палится. Скрипт проверяет и ругается, если правило на него откуда-то появилось.
+
+**Только с IP панели**
+
+Node API (`NODE_API_PORT`, у remnanode это `APP_PORT`, по умолчанию 3000) открывается только для `main-land.meth.ee`. IP не хардкодятся: резолвятся при каждом прогоне и **пересинкиваются раз в сутки** через systemd-таймер `vps-set-panel-ip.timer` — панель переедет на другой IP, ноды подхватят сами.
+
+```bash
+vps-set-panel-ip                    # синкнуть руками
+systemctl list-timers vps-set-panel-ip.timer
+cat /etc/vps-set/panel.conf         # PANEL_HOST, NODE_API_PORT
+```
+
+Если DNS лежит, скрипт **не трогает существующие правила** — не открывает лишнего и не отрезает панель.
+
+**Docker и почему ufw-docker тут ни при чём**
+
+И `remnanode`, и caddy-selfsteal разворачиваются с `network_mode: host` — свои сокеты они вешают прямо на сетевой стек хоста. Значит их трафик идёт обычной цепочкой INPUT, и правила ufw выше на них работают **напрямую**. `ufw-docker allow remnanode 443/tcp` не нужен и не сработает: у host-контейнера нет bridge-IP, с которым ufw-docker умеет работать.
+
+[ufw-docker](https://github.com/chaifeng/ufw-docker) всё равно ставится — он закрывает **все остальные** контейнеры на машине. Любой обычный `-p 5432:5432` пишет ACCEPT прямо в FORWARD и торчит наружу мимо ufw (ровно случай `cryptobot_db:5432`). Скрипт проходит по запущенным контейнерам: host-режим помечает как «уже покрыто», у bridge-контейнеров **читает реально опубликованные порты** из `docker inspect` и разрешает именно их, ничего не угадывая.
+
+По той же причине `deny routed` не ломает Xray: host-сеть не задействует FORWARD вообще, а Xray проксирует на уровне приложения — входящее в INPUT, исходящее в OUTPUT под `allow outgoing`.
+
+**Включение**
+
+Перед `ufw enable` печатает список правил и ждёт подтверждения. Неинтерактивно правила добавит, но не включит — для этого `UFW_YES=1`.
+
+ICMP трогать не надо: дефолтный `/etc/ufw/before.rules` уже пропускает echo-request.
+
+### Проверка ноды (`node`)
+
+Запускать **после** разворачивания remnanode/selfsteal — отвечает на вопрос «почему юзеры не подключаются»:
+
+```bash
+sudo ./setup.sh node
+```
+
+```
+  ok   remnanode    running (network=host)
+  ok   caddy        running (network=host)
+
+  publicly bound sockets:
+    tcp 0.0.0.0:443
+
+  inbound vs ufw:
+    ok      443    listening, allowed
+    BLOCKED 8443   listening but ufw drops it — ufw allow 8443/tcp
+
+  ok   selfsteal 9443 bound to loopback only
+```
+
+Сверяет три вещи: контейнеры подняты и в каком сетевом режиме, каждый публично слушающий сокет имеет правило в ufw, декой не торчит наружу. Самый частый случай — добавил инбаунд в панели, а порт на ноде не открыл: тут он подсветится как `BLOCKED`.
+
+### SSH hardening + fail2ban (`sshd`)
+
+```
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+```
+
+Пишется в `/etc/ssh/sshd_config.d/00-vps-set.conf`. Префикс `00`, а не `99`, намеренно: в sshd выигрывает **первое** вхождение директивы, а облачные образы кладут `50-cloud-init.conf` с `PasswordAuthentication yes` — с 99 наш файл бы просто не сработал.
+
+**Защита от лока:** если ни у root, ни у твоего юзера нет непустого `~/.ssh/authorized_keys` — секция отказывается выключать пароли и говорит об этом. Это не тот ключ, что генерит секция `ssh` (тот для GitHub, исходящий) — нужен именно твой публичный ключ на сервере:
+
+```bash
+ssh-copy-id root@<сервер>
+```
+
+Конфиг применяется только после `sshd -t`; если проверка падает, файл удаляется и sshd не трогается. После рестарта печатает фактические значения из `sshd -T`.
+
+fail2ban: jail `sshd` с портами из `sshd -T`, `backend = systemd` (в 24.04 без rsyslog нет `/var/log/auth.log`, и на файловом бэкенде jail просто не поднимется), `maxretry 5`, `bantime 1h`.
+
+### CrowdSec (`crowdsec`, opt-in)
+
+```bash
+sudo ./setup.sh crowdsec
+```
+
+Ставит crowdsec + `crowdsec-firewall-bouncer-iptables` через официальный инсталлятор репозитория. Даёт блоклисты известных сканеров и ботнетов до того, как они доберутся до ноды. С fail2ban не конфликтует, но дублирует его по SSH — если хочешь только crowdsec: `systemctl disable --now fail2ban`.
 
 ### WARP (`warp`)
 
@@ -111,6 +280,6 @@ remnanode install
 
 ## Чего скрипт не делает
 
-- Не включает `ufw` — включение вслепую по SSH отрезает доступ к серверу. Пакет ставится, правила и `ufw enable` за тобой.
-- Не трогает конфиг sshd (порт, отключение парольного входа) и не настраивает swap.
+- Не меняет порт sshd и не настраивает swap. Секция `sshd` только выключает пароли; переезд на другой порт — руками, после чего прогони `firewall` заново, чтобы правило поехало следом.
+- Не разворачивает саму ноду. `remnawave` кладёт только CLI, деплой — `remnanode install` вручную, после него `sudo ./setup.sh node` для проверки.
 - Сторонние инсталляторы (motd, warp) скачиваются во временный файл, путь печатается перед запуском — можно прервать и посмотреть.
