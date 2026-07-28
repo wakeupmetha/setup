@@ -399,6 +399,9 @@ ani() {
 }
 EOF
   chmod 644 /etc/profile.d/99-vps-set.sh
+  # profile.d is read at login, so the shell running this one still has none of it
+  echo "  ani / ip / ipv6 / ports / speedtest ready — this shell won't see them until:"
+  echo "      source /etc/profile.d/99-vps-set.sh    (or just re-login)"
 }
 
 # --- firewall -----------------------------------------------------------
