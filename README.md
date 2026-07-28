@@ -4,21 +4,30 @@
 
 ## Быстрый сетап
 
-```bash
-git clone git@github.com:wakeupmetha/setup.git && cd setup && sudo ./setup.sh
-```
-
-SSH-клон требует ключа, уже добавленного в GitHub. На свежем сервере ключа ещё нет — либо сначала `sudo ./setup.sh ssh` (см. ниже), либо забирай по HTTPS:
+Одна команда, работает и на голом сервере, и когда `~/setup` уже склонирован:
 
 ```bash
-git clone https://github.com/wakeupmetha/setup.git && cd setup && sudo ./setup.sh
+git clone https://github.com/wakeupmetha/setup.git ~/setup 2>/dev/null; cd ~/setup && git pull --ff-only && sudo ./setup.sh
 ```
 
-Без клона (тогда не подхватятся гифки из `assets/`):
+HTTPS, потому что на свежем сервере ключа в GitHub ещё нет — его как раз генерит секция `ssh`. После того как добавишь ключ, можно переключить:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wakeupmetha/setup/main/setup.sh -o /tmp/setup.sh && sudo bash /tmp/setup.sh
+git remote set-url origin git@github.com:wakeupmetha/setup.git
 ```
+
+## meth-setup
+
+После первого прогона появляется команда `meth-setup` — она сама подтягивает репозиторий и перезапускает скрипт, из любой директории, без `cd` и `git pull`:
+
+```bash
+meth-setup                # обновиться и прогнать дефолтный набор
+meth-setup node           # только проверка ноды
+meth-setup firewall sshd  # пересобрать правила
+meth-setup --help         # список секций
+```
+
+Если в локальной копии есть несохранённые правки, `meth-setup` не будет их затирать — скажет об этом и запустит версию с диска.
 
 ## Использование
 
@@ -66,7 +75,7 @@ VERBOSE=1 sudo -E ./setup.sh
 | `fetch` | да | neofetch (fallback → fastfetch), chafa, ffmpeg (`--no-install-recommends`, иначе тянет ~100 МБ mesa/gtk/vulkan, бесполезных на headless), `pipx install anifetch`, копирует `assets/*` в `~/.local/share/anifetch/assets` |
 | `speedtest` | да | [cloudflare-speed-cli](https://github.com/kavehtehrani/cloudflare-speed-cli) — статический musl-бинарь из релизов в `/usr/local/bin`, с проверкой sha256 |
 | `motd` | да | `toilet` + `toilet-fonts`, ставит [distillium/motd](https://github.com/distillium/motd) |
-| `shell` | да | пишет `/etc/profile.d/99-vps-set.sh` — шорткаты для всех юзеров |
+| `shell` | да | `/etc/profile.d/99-vps-set.sh` — шорткаты для всех юзеров, плюс команда `meth-setup` |
 | `ssh` | да | ed25519-ключ для GitHub с почтой в комментарии, `~/.ssh/config`, пин хост-ключей github.com, печатает pubkey |
 | `firewall` | да | ufw под ноду: deny incoming/routed, 22 (limit) + 80/443/2525, node API только с IP панели, ufw-docker, суточный таймер резолва панели |
 | `sshd` | да, последней | вход только по ключам (`PasswordAuthentication no`), `PermitRootLogin prohibit-password`, fail2ban jail на порты живого sshd |

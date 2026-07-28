@@ -294,6 +294,37 @@ remnawave_install() {
 
 # --- shell shortcuts ----------------------------------------------------
 shell_install() {
+  log "meth-setup -> /usr/local/bin"
+  # one entry point from anywhere: updates the repo, then re-runs this script
+  local origin
+  origin=$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null) \
+    || origin=https://github.com/wakeupmetha/setup.git
+  { printf '#!/usr/bin/env bash\nDIR=%q\nREPO=%q\n' "$SCRIPT_DIR" "$origin"
+    cat <<'EOF'
+# meth-setup [section...] — pull the repo and run setup.sh
+set -euo pipefail
+case "${1:-}" in
+  -h|--help)
+    echo "meth-setup [section...]"
+    echo "  sections: base docker python fetch speedtest motd shell ssh"
+    echo "            firewall sshd node crowdsec warp remnawave verify"
+    echo "  no args  = default run"
+    exit 0 ;;
+esac
+if [ -d "$DIR/.git" ]; then
+  git -C "$DIR" pull --ff-only || {
+    echo "[!] repo not updated — running the copy on disk" >&2
+    git -C "$DIR" status --short >&2
+  }
+else
+  git clone "$REPO" "$DIR"
+fi
+[ "$(id -u)" -eq 0 ] && exec "$DIR/setup.sh" "$@" || exec sudo -E "$DIR/setup.sh" "$@"
+EOF
+  } > /usr/local/bin/meth-setup
+  chmod 755 /usr/local/bin/meth-setup
+  echo "  meth-setup [section...]  — updates $SCRIPT_DIR and re-runs from anywhere"
+
   log "shortcuts -> /etc/profile.d/99-vps-set.sh"
   printf '%s\n' "ANIFETCH_FILE=\"${ANI_FILE:-}\"" > /etc/profile.d/99-vps-set.sh
   cat >> /etc/profile.d/99-vps-set.sh <<'EOF'
@@ -638,6 +669,7 @@ verify() {
   have neofetch || have fastfetch || { echo "  MISS neofetch/fastfetch"; rc=1; }
   [ -x "$TARGET_HOME/.local/bin/anifetch" ] || { printf '  \033[31mMISS\033[0m anifetch\n'; rc=1; }
   [ -f /etc/profile.d/99-vps-set.sh ] || { printf '  \033[31mMISS\033[0m shortcuts\n'; rc=1; }
+  [ -x /usr/local/bin/meth-setup ] || { printf '  \033[31mMISS\033[0m meth-setup\n'; rc=1; }
   [ -f /etc/update-motd.d/00-dist-motd ] || { printf '  \033[31mMISS\033[0m motd\n'; rc=1; }
   [ -f "$TARGET_HOME/.ssh/id_ed25519.pub" ] || { printf '  \033[31mMISS\033[0m github ssh key\n'; rc=1; }
   # opt-in sections: reported, never counted as failures
