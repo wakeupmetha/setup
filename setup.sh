@@ -655,7 +655,12 @@ ani() {
   # anifetch drives fastfetch by default; noble ships neofetch instead
   local backend=""
   command -v fastfetch >/dev/null || backend="-nf --force"
-  anifetch "$f" -r 10 -W 60 -H 30 -ca "--symbols wide --fg-only" $backend "$@"
+  # --no-input-restore: without it anifetch imports pynput on exit to replay your
+  # keystrokes, which needs an X display and blows up on a headless box.
+  # --symbols block: `wide` means full-width CJK glyphs — that is why the animation
+  # comes out as japanese text. Override the lot with ANI_CHAFA=...
+  anifetch "$f" -r 10 -W 60 -H 30 \
+    -ca "${ANI_CHAFA:---symbols block --fg-only}" --no-input-restore $backend "$@"
 }
 EOF
   chmod 644 /etc/profile.d/99-vps-set.sh

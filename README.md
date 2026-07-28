@@ -180,6 +180,14 @@ ANI_FILE=shadow.mp4 sudo -E ./setup.sh fetch shell
 
 Поменять потом — правь `ANIFETCH_FILE` в `/etc/profile.d/99-vps-set.sh` или прогони `sudo ./setup.sh fetch shell` ещё раз.
 
+Вид анимации задаётся аргументами chafa. По умолчанию `--symbols block --fg-only`; поменять на лету:
+
+```bash
+ANI_CHAFA="--symbols braille --fg-only" ani
+```
+
+`--symbols wide` даёт full-width CJK-глифы — картинка получается из японских иероглифов. Иногда это то, что нужно, но по умолчанию не оно. Полный список наборов — `chafa --help`.
+
 **Если `ani` сыпет `chafa: Unknown file format` на каждом кадре** — это битый кэш кадров от прерванного рендера:
 
 ```bash
