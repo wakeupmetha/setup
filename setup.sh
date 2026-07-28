@@ -536,8 +536,16 @@ alias ...='cd ../..'
 alias df='df -hT -x tmpfs -x devtmpfs'
 alias free='free -h'
 
-# animated neofetch
+# animated neofetch.  `ani --fresh` throws the frame cache away first: anifetch calls
+# ffmpeg without -y, so it will not overwrite frames left behind by an interrupted
+# render, and -fr alone keeps replaying the broken ones.
 ani() {
+  if [ "${1:-}" = "--fresh" ]; then
+    shift
+    find "$HOME/.local/share/anifetch" -maxdepth 1 -type d \
+      -regextype posix-extended -regex '.*/[0-9a-f]{64}' -exec rm -rf {} + 2>/dev/null
+    set -- -fr "$@"
+  fi
   [ -n "$ANIFETCH_FILE" ] || { echo "set ANIFETCH_FILE in /etc/profile.d/99-vps-set.sh"; return 1; }
   local f="$HOME/.local/share/anifetch/assets/$ANIFETCH_FILE"
   [ -f "$f" ] || f="$ANIFETCH_FILE"
