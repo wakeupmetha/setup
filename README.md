@@ -1,20 +1,24 @@
-# vps-set
+# setup
 
 Один скрипт для первичной настройки VPS. Ubuntu 22.04/24.04, Debian 12. Идемпотентный — можно гонять повторно.
 
 ## Быстрый сетап
 
 ```bash
-git clone https://github.com/<user>/vps-set.git && cd vps-set && chmod +x setup.sh && sudo ./setup.sh
+git clone git@github.com:wakeupmetha/setup.git && cd setup && chmod +x setup.sh && sudo ./setup.sh
+```
+
+SSH-клон требует ключа, уже добавленного в GitHub. На свежем сервере ключа ещё нет — либо сначала `sudo ./setup.sh ssh` (см. ниже), либо забирай по HTTPS:
+
+```bash
+git clone https://github.com/wakeupmetha/setup.git && cd setup && chmod +x setup.sh && sudo ./setup.sh
 ```
 
 Без клона (тогда не подхватятся гифки из `assets/`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/vps-set/main/setup.sh -o /tmp/setup.sh && sudo bash /tmp/setup.sh
+curl -fsSL https://raw.githubusercontent.com/wakeupmetha/setup/main/setup.sh -o /tmp/setup.sh && sudo bash /tmp/setup.sh
 ```
-
-Замени `<user>` на свой GitHub-аккаунт.
 
 ## Использование
 
