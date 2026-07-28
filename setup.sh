@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# VPS bootstrap: base packages, docker, python, neofetch/anifetch, distillium/motd,
+# VPS bootstrap: base packages, docker, python, fastfetch/anifetch, distillium/motd,
 # shell shortcuts, github ssh key. Ubuntu 22.04/24.04, Debian 12. Run as root or with sudo.
 #
 #   ./setup.sh                  # default sections
 #   ./setup.sh docker shell     # only these sections
 #   ./setup.sh verify           # check what's installed
 #
-# Default:  base docker python fetch speedtest motd shell ssh firewall
+# Default:  base docker python fetch speedtest motd shell ssh firewall sshd
 # Opt-in:   warp (cloudflare warp, changes routing)  remnawave (vpn panel CLIs)
 #
 # Env: SSH_EMAIL=you@mail.com   comment on the github key (asked interactively if unset)
@@ -137,7 +137,25 @@ python_install() {
 }
 
 # --- neofetch / anifetch ------------------------------------------------
-neofetch_pkg() { apt-get install -y -qq neofetch 2>/dev/null || apt-get install -y -qq fastfetch; }
+# fastfetch only entered the ubuntu archive in 25.04, so on noble it comes from the
+# release deb. anifetch drives fastfetch by default and its config is what renders
+# the panel next to the animation.
+fastfetch_pkg() {
+  have fastfetch && return 0
+  apt-get install -y -qq fastfetch 2>/dev/null && return 0
+  local arch tmp
+  case "$(uname -m)" in
+    x86_64|amd64)  arch=amd64 ;;
+    aarch64|arm64) arch=aarch64 ;;
+    *) warn "no fastfetch build for $(uname -m), falling back to neofetch"
+       apt-get install -y -qq neofetch; return 0 ;;
+  esac
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/fastfetch.deb" \
+    "https://github.com/fastfetch-cli/fastfetch/releases/latest/download/fastfetch-linux-$arch.deb"
+  apt-get install -y -qq "$tmp/fastfetch.deb"
+  rm -rf "$tmp"
+}
 # PyPI `anifetch` is an abandoned 0.1.0 that divides by total_swap and dies with
 # ZeroDivisionError on any swapless box. The maintained package is `anifetch-cli`
 # (same `anifetch` command). Needs python >= 3.11.
@@ -147,12 +165,13 @@ anifetch_pkg() {
 }
 
 fetch_install() {
-  log "neofetch / anifetch"
-  step "neofetch (or fastfetch)" neofetch_pkg
+  log "fastfetch / anifetch"
+  step "fastfetch" fastfetch_pkg
   # --no-install-recommends: ffmpeg otherwise drags in ~100 MB of mesa/gtk/vulkan
   # drivers that are useless on a headless VPS.
   step "chafa + ffmpeg" apt-get install -y -qq --no-install-recommends chafa ffmpeg
   step "anifetch" anifetch_pkg
+  step "login panel + daily cache" fetch_panel
 
   # copy local gifs/videos into anifetch's asset dir — media only, the README in
   # there is documentation, not something to play
@@ -167,6 +186,125 @@ fetch_install() {
   [ -n "$ANI_FILE" ] || pick_animation "$assets" \
     || warn "no anifetch asset found — put a .gif/.mp4 in $SCRIPT_DIR/assets or run: ANI_FILE=x.mp4 $0 fetch shell"
 }
+
+# Everything in the login panel that needs the network or a slow apt call is
+# refreshed once a day here, never at login.
+fetch_cache_install() {
+  cat > /usr/local/bin/vps-set-fetch-cache <<'EOF'
+#!/usr/bin/env bash
+# Cache public IP, geo and pending updates for the login panel.
+set -uo pipefail
+OUT="${FETCH_CACHE:-/var/cache/vps-set/fetch.env}"
+mkdir -p "$(dirname "$OUT")"
+get() { curl -fsS --max-time 6 "$@" 2>/dev/null; }
+json=$(get https://ipinfo.io/json || true)
+field() { printf '%s' "$json" | jq -r ".$1 // empty" 2>/dev/null; }
+ip4=$(field ip); [ -n "$ip4" ] || ip4=$(get -4 https://ipinfo.io/ip || true)
+ip6=$(get -6 https://ipinfo.io/ip || true)
+# -s upgrade is slow (~1s) but this runs daily in the background, not at login
+upg=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst ') || upg=0
+sec=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | grep -ci security) || sec=0
+{
+  printf 'PUBLIC_IP4=%q\n' "$ip4"
+  printf 'PUBLIC_IP6=%q\n' "$ip6"
+  printf 'CITY=%q\n'       "$(field city)"
+  printf 'REGION=%q\n'     "$(field region)"
+  printf 'COUNTRY=%q\n'    "$(field country)"
+  printf 'ORG=%q\n'        "$(field org)"
+  printf 'UPDATES=%q\n'    "$upg"
+  printf 'SECURITY=%q\n'   "$sec"
+} > "$OUT"
+chmod 644 "$OUT"
+EOF
+  chmod 755 /usr/local/bin/vps-set-fetch-cache
+
+  cat > /etc/systemd/system/vps-set-fetch-cache.service <<'EOF'
+[Unit]
+Description=Refresh the login panel cache
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vps-set-fetch-cache
+EOF
+  cat > /etc/systemd/system/vps-set-fetch-cache.timer <<'EOF'
+[Unit]
+Description=Daily login panel cache refresh
+[Timer]
+OnCalendar=daily
+OnBootSec=2min
+Persistent=true
+RandomizedDelaySec=30m
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now vps-set-fetch-cache.timer >/dev/null
+}
+
+# The panel anifetch draws next to the animation (and what plain `ff` prints).
+# logo: none — anifetch supplies the visual, fastfetch must not draw its own.
+fastfetch_config() {
+  local dir="$TARGET_HOME/.config/fastfetch"
+  install -d -o "$TARGET_USER" -g "$TARGET_USER" "$dir"
+  cat > "$dir/config.jsonc" <<'EOF'
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": { "type": "none" },
+  "display": {
+    "separator": "  ",
+    "key": { "width": 8 }
+  },
+  "modules": [
+    { "type": "title" },
+    "separator",
+
+    { "type": "os",       "key": "os" },
+    { "type": "kernel",   "key": "kernel" },
+    { "type": "uptime",   "key": "up" },
+    { "type": "shell",    "key": "shell" },
+    { "type": "terminal", "key": "term" },
+    { "type": "packages", "key": "pkgs" },
+    "break",
+
+    { "type": "cpu",     "key": "cpu" },
+    { "type": "loadavg", "key": "load" },
+    { "type": "memory",  "key": "ram" },
+    { "type": "swap",    "key": "swap" },
+    { "type": "disk",    "key": "disk", "folders": "/" },
+    "break",
+
+    { "type": "localip", "key": "lan", "defaultRouteOnly": true, "showIpv6": false },
+    { "type": "command", "key": "wan", "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; printf '%s' \"${PUBLIC_IP4:-n/a}\"; [ -n \"${PUBLIC_IP6:-}\" ] && printf '  %s' \"$PUBLIC_IP6\"; echo" },
+    { "type": "command", "key": "geo", "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${CITY:-?}, ${COUNTRY:-?} - $(echo \"${ORG:-?}\" | cut -c1-28)\"" },
+    "break",
+
+    { "type": "command", "key": "docker", "parallel": true,
+      "text": "command -v docker >/dev/null || { echo 'not installed'; exit 0; }; r=$(docker ps -q 2>/dev/null | wc -l); t=$(docker ps -aq 2>/dev/null | wc -l); echo \"$r running / $t total\"" },
+    { "type": "command", "key": "node", "parallel": true,
+      "text": "docker ps --format '{{.Names}}' 2>/dev/null | grep -qx remnanode && echo 'remnanode up' || echo 'not deployed'" },
+    { "type": "command", "key": "ufw", "parallel": true,
+      "text": "s=$(ufw status 2>/dev/null | sed -n 's/^Status: //p'); n=$(ufw status numbered 2>/dev/null | grep -c '^\\['); echo \"${s:-no access}${n:+, $n rules}\"" },
+    { "type": "command", "key": "f2b", "parallel": true,
+      "text": "s=$(fail2ban-client status sshd 2>/dev/null) || { echo 'n/a'; exit 0; }; c=$(printf '%s' \"$s\" | sed -n 's/.*Currently banned:[[:space:]]*//p'); t=$(printf '%s' \"$s\" | sed -n 's/.*Total banned:[[:space:]]*//p'); echo \"${c:-0} banned now / ${t:-0} total\"" },
+    { "type": "command", "key": "logins", "parallel": true, "splitLines": true,
+      "text": "last -i -w -n 12 2>/dev/null | awk '$1!=\"reboot\" && $3 ~ /^[0-9]/ {printf \"%-15s %s %s %s\\n\", $3, $5, $6, $7}' | head -3" },
+    "break",
+
+    { "type": "command", "key": "updates", "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${UPDATES:-?} pending, ${SECURITY:-0} security\"" },
+    { "type": "command", "key": "reboot",
+      "text": "[ -f /var/run/reboot-required ] && echo 'REQUIRED - new kernel or libs staged' || echo 'not needed'" },
+    "break",
+    "colors"
+  ]
+}
+EOF
+  chown "$TARGET_USER:$TARGET_USER" "$dir/config.jsonc"
+}
+
+fetch_panel() { fastfetch_config; fetch_cache_install; /usr/local/bin/vps-set-fetch-cache; }
 
 is_media() { case "${1,,}" in *.gif|*.mp4|*.webm|*.mkv|*.mov|*.avi|*.m4v) return 0 ;; *) return 1 ;; esac; }
 
@@ -386,7 +524,7 @@ ipv6() {
 ports()  { ss -tulpn; }
 alias speedtest='cloudflare-speed-cli'
 update() { sudo apt-get update && sudo apt-get -y upgrade; }
-ff()     { command -v neofetch >/dev/null && neofetch "$@" || fastfetch "$@"; }
+ff()     { command -v fastfetch >/dev/null && fastfetch "$@" || neofetch "$@"; }
 
 alias d='docker'
 alias dc='docker compose'
@@ -685,7 +823,9 @@ verify() {
   check toilet
   check jq
   check cloudflare-speed-cli "cloudflare-speed-cli --version"
-  have neofetch || have fastfetch || { echo "  MISS neofetch/fastfetch"; rc=1; }
+  have fastfetch || have neofetch || { echo "  MISS fastfetch/neofetch"; rc=1; }
+  [ -f "$TARGET_HOME/.config/fastfetch/config.jsonc" ] || { printf '  \033[31mMISS\033[0m login panel config\n'; rc=1; }
+  [ -f /var/cache/vps-set/fetch.env ] || { printf '  \033[31mMISS\033[0m panel cache (run: vps-set-fetch-cache)\n'; rc=1; }
   [ -x "$TARGET_HOME/.local/bin/anifetch" ] || { printf '  \033[31mMISS\033[0m anifetch\n'; rc=1; }
   [ -f /etc/profile.d/99-vps-set.sh ] || { printf '  \033[31mMISS\033[0m shortcuts\n'; rc=1; }
   [ -x /usr/local/bin/meth-setup ] || { printf '  \033[31mMISS\033[0m meth-setup\n'; rc=1; }
@@ -706,7 +846,7 @@ verify() {
 # step count per section, only used to scale the progress bar (over/undershoot is clamped)
 steps_of() {
   case $1 in
-    base) echo 3;; docker) echo 3;; python) echo 2;; fetch) echo 3;;
+    base) echo 3;; docker) echo 3;; python) echo 2;; fetch) echo 4;;
     motd) echo 1;; ssh) echo 1;; remnawave) echo 1;; speedtest) echo 1;;
     firewall) echo 2;; sshd) echo 1;; crowdsec) echo 1;; *) echo 0;;
   esac

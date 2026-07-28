@@ -72,7 +72,7 @@ VERBOSE=1 sudo -E ./setup.sh
 | `base` | да | `apt update && upgrade`, curl/wget/git/htop/tmux/jq/unzip/rsync/tree/ncdu, net-tools/dnsutils/mtr/nmap, build-essential, ufw, fail2ban |
 | `docker` | да | docker-ce + cli + containerd + buildx + compose-plugin из официального репозитория, `systemctl enable --now docker`, добавляет юзера в группу `docker` |
 | `python` | да | python3, venv, pip, dev-headers, pipx + `pipx ensurepath` |
-| `fetch` | да | neofetch (fallback → fastfetch), chafa, ffmpeg (`--no-install-recommends`, иначе тянет ~100 МБ mesa/gtk/vulkan, бесполезных на headless), `pipx install anifetch`, копирует `assets/*` в `~/.local/share/anifetch/assets` |
+| `fetch` | да | fastfetch + панель входа, chafa, ffmpeg (`--no-install-recommends`, иначе тянет ~100 МБ mesa/gtk/vulkan, бесполезных на headless), `pipx install anifetch-cli`, копирует медиа из `assets/` |
 | `speedtest` | да | [cloudflare-speed-cli](https://github.com/kavehtehrani/cloudflare-speed-cli) — статический musl-бинарь из релизов в `/usr/local/bin`, с проверкой sha256 |
 | `motd` | да | `toilet` + `toilet-fonts`, ставит [distillium/motd](https://github.com/distillium/motd) |
 | `shell` | да | `/etc/profile.d/99-vps-set.sh` — шорткаты для всех юзеров, плюс команда `meth-setup` |
@@ -103,6 +103,39 @@ VERBOSE=1 sudo -E ./setup.sh
 **Про `ip`.** Это функция, а не алиас: без аргументов показывает внешние адреса, с любым аргументом уходит в `command ip "$@"`. То есть `ip a`, `ip route`, `ip link set …` работают как раньше. Скрипты и systemd-юниты вообще не задеты — функции из `/etc/profile.d` видны только интерактивным шеллам, motd и прочее продолжают звать настоящий бинарник.
 
 `ipv6 off` откажется работать, если ты сам подключён по IPv6 (иначе разорвёт сессию) — проверяется `$SSH_CONNECTION`. Продавить: `ipv6 off -f`. Выключение пишется в `/etc/sysctl.d/99-disable-ipv6.conf`, `ipv6 on` его удаляет.
+
+### Панель входа (`fetch`)
+
+Справа от анимации `ani` рисуется fastfetch с конфигом под сервер. Он же выводится по `ff`.
+
+```
+os      Ubuntu 24.04.3 LTS x86_64      docker  6 running / 8 total
+kernel  6.8.0-136-generic              node    remnanode up
+up      12 days, 4 hours               ufw     active, 11 rules
+shell   bash 5.2.21                    f2b     3 banned now / 47 total
+pkgs    812 (dpkg)                     logins  188.4.2.1   Jul 28 19:02
+cpu     AMD EPYC 7443 (4)                      93.72.10.5  Jul 27 08:44
+load    0.08 0.11 0.09                 updates 7 pending, 3 security
+ram     1.94 GiB / 7.76 GiB (25%)      reboot  REQUIRED - new kernel staged
+swap    disabled
+disk    18 GiB / 78 GiB (23%)
+lan     10.0.0.5
+wan     5.181.x.x
+geo     Tallinn, EE - AS47583 Hostinger
+```
+
+**Почему это не тормозит вход.** Публичный IP, город и счётчик обновлений — сетевые и медленные (`apt-get -s upgrade` ~1 сек). Они считаются раз в сутки таймером `vps-set-fetch-cache.timer` и складываются в `/var/cache/vps-set/fetch.env`, а панель их только читает. Всё остальное локальное и быстрое, команды помечены `parallel` и выполняются одновременно.
+
+```bash
+vps-set-fetch-cache                        # обновить кэш руками
+systemctl list-timers vps-set-fetch-cache.timer
+```
+
+Правится конфиг в `~/.config/fastfetch/config.jsonc` — обычный JSONC, модули документированы в [схеме fastfetch](https://github.com/fastfetch-cli/fastfetch/blob/dev/doc/json_schema.json). `logo: none` стоит намеренно: картинку рисует anifetch, свой ASCII-логотип fastfetch рисовать не должен.
+
+`ufw` и `f2b` требуют root — под обычным юзером в этих строках будет `no access` / `n/a`.
+
+fastfetch в репозиториях Ubuntu появился только в 25.04, поэтому на 24.04 ставится `.deb` из релизов проекта.
 
 ### Анимация для `ani` (`fetch`)
 
