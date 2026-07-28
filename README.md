@@ -5,13 +5,13 @@
 ## Быстрый сетап
 
 ```bash
-git clone git@github.com:wakeupmetha/setup.git && cd setup && chmod +x setup.sh && sudo ./setup.sh
+git clone git@github.com:wakeupmetha/setup.git && cd setup && sudo ./setup.sh
 ```
 
 SSH-клон требует ключа, уже добавленного в GitHub. На свежем сервере ключа ещё нет — либо сначала `sudo ./setup.sh ssh` (см. ниже), либо забирай по HTTPS:
 
 ```bash
-git clone https://github.com/wakeupmetha/setup.git && cd setup && chmod +x setup.sh && sudo ./setup.sh
+git clone https://github.com/wakeupmetha/setup.git && cd setup && sudo ./setup.sh
 ```
 
 Без клона (тогда не подхватятся гифки из `assets/`):
