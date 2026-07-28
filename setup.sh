@@ -682,7 +682,11 @@ ani() {
   # keystrokes, which needs an X display and blows up on a headless box.
   # --symbols block: `wide` means full-width CJK glyphs — that is why the animation
   # comes out as japanese text. Override the lot with ANI_CHAFA=...
-  anifetch "$f" -r 10 -W 60 -H 30 \
+  # chafa's colour depth is a "best guess" from TERM/COLORTERM, so the same gif looks
+  # different per client; pin it with ANI_CHAFA="... -c 256".
+  # ANI_LOOP: -1 loops forever. Clients that redraw poorly (Termius) lock up if you
+  # scroll while it is still animating — give them a finite count.
+  anifetch "$f" -r 10 -W 60 -H 30 -l "${ANI_LOOP:--1}" \
     -ca "${ANI_CHAFA:---symbols block --fg-only}" --no-input-restore $backend "$@"
 }
 EOF
