@@ -185,6 +185,30 @@ fetch_install() {
   [ "$copied" = 0 ] || chown -R "$TARGET_USER:$TARGET_USER" "$assets"
   [ -n "$ANI_FILE" ] || pick_animation "$assets" \
     || warn "no anifetch asset found — put a .gif/.mp4 in $SCRIPT_DIR/assets or run: ANI_FILE=x.mp4 $0 fetch shell"
+
+  # For video sources anifetch renders JPEG frames via `ffmpeg -vf format=rgba`, and
+  # mjpeg cannot do rgba — the result is an RGB JPEG with no JFIF header, which chafa
+  # 1.14 (the version in noble) refuses with "Unknown file format". A .gif source takes
+  # anifetch's transparent path and yields PNG frames instead, which always load.
+  case "${ANI_FILE,,}" in
+    ""|*.gif) ;;
+    *) if step "converting $ANI_FILE to gif" gif_convert "$assets/$ANI_FILE" \
+          && [ -s "$assets/${ANI_FILE%.*}.gif" ]; then
+         ANI_FILE="${ANI_FILE%.*}.gif"
+         echo "  animation: $ANI_FILE"
+       else
+         warn "gif conversion failed — keeping $ANI_FILE, chafa may reject its frames"
+       fi ;;
+  esac
+}
+
+gif_convert() {
+  local src=$1 dst="${1%.*}.gif"
+  [ -s "$dst" ] && return 0
+  ffmpeg -y -v error -i "$src" \
+    -vf "fps=12,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" \
+    -loop 0 "$dst"
+  chown "$TARGET_USER:$TARGET_USER" "$dst"
 }
 
 # Everything in the login panel that needs the network or a slow apt call is
