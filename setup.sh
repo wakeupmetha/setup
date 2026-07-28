@@ -148,22 +148,27 @@ fetch_install() {
   step "chafa + ffmpeg" apt-get install -y -qq --no-install-recommends chafa ffmpeg
   step "anifetch" anifetch_pkg
 
-  # copy any local gifs/videos into anifetch's asset dir
-  local assets="$TARGET_HOME/.local/share/anifetch/assets"
-  if [ -d "$SCRIPT_DIR/assets" ] && compgen -G "$SCRIPT_DIR/assets/*" >/dev/null; then
+  # copy local gifs/videos into anifetch's asset dir — media only, the README in
+  # there is documentation, not something to play
+  local assets="$TARGET_HOME/.local/share/anifetch/assets" f copied=0
+  for f in "$SCRIPT_DIR"/assets/*; do
+    [ -f "$f" ] || continue
+    is_media "$f" || continue
     install -d -o "$TARGET_USER" -g "$TARGET_USER" "$assets"
-    cp "$SCRIPT_DIR"/assets/* "$assets/"
-    chown -R "$TARGET_USER:$TARGET_USER" "$assets"
-  fi
+    cp "$f" "$assets/"; copied=1
+  done
+  [ "$copied" = 0 ] || chown -R "$TARGET_USER:$TARGET_USER" "$assets"
   [ -n "$ANI_FILE" ] || pick_animation "$assets" \
     || warn "no anifetch asset found — put a .gif/.mp4 in $SCRIPT_DIR/assets or run: ANI_FILE=x.mp4 $0 fetch shell"
 }
 
-# menu of what's in the assets dir; sets $ANI_FILE. One file or no tty -> take the first.
+is_media() { case "${1,,}" in *.gif|*.mp4|*.webm|*.mkv|*.mov|*.avi|*.m4v) return 0 ;; *) return 1 ;; esac; }
+
+# menu of playable files in the assets dir; sets $ANI_FILE. One file or no tty -> first.
 pick_animation() {
   local assets=$1 files=() n i=1
   [ -d "$assets" ] || return 1
-  mapfile -t files < <(cd "$assets" && ls -1)
+  mapfile -t files < <(cd "$assets" && ls -1 | grep -Ei '\.(gif|mp4|webm|mkv|mov|avi|m4v)$')
   [ ${#files[@]} -gt 0 ] || return 1
 
   if [ ${#files[@]} -eq 1 ] || [ ! -t 0 ]; then
