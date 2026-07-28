@@ -138,7 +138,13 @@ python_install() {
 
 # --- neofetch / anifetch ------------------------------------------------
 neofetch_pkg() { apt-get install -y -qq neofetch 2>/dev/null || apt-get install -y -qq fastfetch; }
-anifetch_pkg() { as_user pipx install anifetch || as_user pipx upgrade anifetch; }
+# PyPI `anifetch` is an abandoned 0.1.0 that divides by total_swap and dies with
+# ZeroDivisionError on any swapless box. The maintained package is `anifetch-cli`
+# (same `anifetch` command). Needs python >= 3.11.
+anifetch_pkg() {
+  as_user pipx uninstall anifetch >/dev/null 2>&1 || true
+  as_user pipx install anifetch-cli || as_user pipx upgrade anifetch-cli
+}
 
 fetch_install() {
   log "neofetch / anifetch"
@@ -395,7 +401,12 @@ alias free='free -h'
 # animated neofetch
 ani() {
   [ -n "$ANIFETCH_FILE" ] || { echo "set ANIFETCH_FILE in /etc/profile.d/99-vps-set.sh"; return 1; }
-  anifetch "$ANIFETCH_FILE" -r 10 -W 60 -H 30 -c "--symbols wide --fg-only" "$@"
+  local f="$HOME/.local/share/anifetch/assets/$ANIFETCH_FILE"
+  [ -f "$f" ] || f="$ANIFETCH_FILE"
+  # anifetch drives fastfetch by default; noble ships neofetch instead
+  local backend=""
+  command -v fastfetch >/dev/null || backend="-nf --force"
+  anifetch "$f" -r 10 -W 60 -H 30 -ca "--symbols wide --fg-only" $backend "$@"
 }
 EOF
   chmod 644 /etc/profile.d/99-vps-set.sh
