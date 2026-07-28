@@ -191,16 +191,20 @@ fetch_install() {
   # mjpeg cannot do rgba — the result is an RGB JPEG with no JFIF header, which chafa
   # 1.14 (the version in noble) refuses with "Unknown file format". A .gif source takes
   # anifetch's transparent path and yields PNG frames instead, which always load.
-  case "${ANI_FILE,,}" in
-    ""|*.gif) ;;
-    *) if step "converting $ANI_FILE to gif" gif_convert "$assets/$ANI_FILE" \
-          && [ -s "$assets/${ANI_FILE%.*}.gif" ]; then
-         ANI_FILE="${ANI_FILE%.*}.gif"
-         echo "  animation: $ANI_FILE"
-       else
-         warn "gif conversion failed — keeping $ANI_FILE, chafa may reject its frames"
-       fi ;;
-  esac
+  ensure_gif
+}
+
+# $ANI_FILE must always end up a .gif, whichever section set it — see the comment above.
+ensure_gif() {
+  local assets="$TARGET_HOME/.local/share/anifetch/assets" dst
+  case "${ANI_FILE,,}" in ""|*.gif) return 0 ;; esac
+  dst="${ANI_FILE%.*}.gif"
+  if [ -s "$assets/$dst" ] || step "converting $ANI_FILE to gif" gif_convert "$assets/$ANI_FILE"; then
+    if [ -s "$assets/$dst" ]; then
+      ANI_FILE="$dst"; echo "  animation: $ANI_FILE"; return 0
+    fi
+  fi
+  warn "gif conversion failed — keeping $ANI_FILE, chafa will likely reject its frames"
 }
 
 gif_convert() {
@@ -415,7 +419,10 @@ is_media() { case "${1,,}" in *.gif|*.mp4|*.webm|*.mkv|*.mov|*.avi|*.m4v) return
 pick_animation() {
   local assets=$1 files=() n i=1
   [ -d "$assets" ] || return 1
-  mapfile -t files < <(cd "$assets" && ls -1 | grep -Ei '\.(gif|mp4|webm|mkv|mov|avi|m4v)$')
+  # hide a source once we have converted it: listing both playboi-carti.mp4 and
+  # playboi-carti.gif is noise, and picking the mp4 gives frames chafa cannot read
+  mapfile -t files < <(cd "$assets" && ls -1 | grep -Ei '\.(gif|mp4|webm|mkv|mov|avi|m4v)$' \
+    | while read -r n; do case "${n,,}" in *.gif) echo "$n" ;; *) [ -e "${n%.*}.gif" ] || echo "$n" ;; esac; done)
   [ ${#files[@]} -gt 0 ] || return 1
 
   if [ ${#files[@]} -eq 1 ] || [ ! -t 0 ]; then
@@ -587,6 +594,8 @@ EOF
       || pick_animation "$TARGET_HOME/.local/share/anifetch/assets" </dev/null \
       || true
   fi
+  # the fallback above can land on an .mp4, whose frames chafa cannot read
+  ensure_gif
   printf '%s\n' "ANIFETCH_FILE=\"${ANI_FILE:-}\"" > /etc/profile.d/99-vps-set.sh
   cat >> /etc/profile.d/99-vps-set.sh <<'EOF'
 # --- vps-set shortcuts ---
@@ -658,9 +667,14 @@ ani() {
       -regextype posix-extended -regex '.*/[0-9a-f]{64}' -exec rm -rf {} + 2>/dev/null
     set -- -fr "$@"
   fi
-  [ -n "$ANIFETCH_FILE" ] || { echo "set ANIFETCH_FILE in /etc/profile.d/99-vps-set.sh"; return 1; }
-  local f="$HOME/.local/share/anifetch/assets/$ANIFETCH_FILE"
-  [ -f "$f" ] || f="$ANIFETCH_FILE"
+  # read the current pick from disk, not from whatever this shell sourced hours ago —
+  # otherwise `setup.sh fetch` changes the animation and the open shell keeps the old one
+  local name
+  name=$(sed -n 's/^ANIFETCH_FILE="\(.*\)"$/\1/p' /etc/profile.d/99-vps-set.sh 2>/dev/null)
+  [ -n "$name" ] || name="$ANIFETCH_FILE"
+  [ -n "$name" ] || { echo "no animation set — run: sudo setup.sh fetch shell"; return 1; }
+  local f="$HOME/.local/share/anifetch/assets/$name"
+  [ -f "$f" ] || f="$name"
   # anifetch drives fastfetch by default; noble ships neofetch instead
   local backend=""
   command -v fastfetch >/dev/null || backend="-nf --force"
