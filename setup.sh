@@ -596,7 +596,17 @@ EOF
   fi
   # the fallback above can land on an .mp4, whose frames chafa cannot read
   ensure_gif
-  printf '%s\n' "ANIFETCH_FILE=\"${ANI_FILE:-}\"" > /etc/profile.d/99-vps-set.sh
+  # ani settings live at the top of the generated file so they can be edited in place;
+  # keep whatever is there already rather than resetting it on every run
+  local pd=/etc/profile.d/99-vps-set.sh chafa loop
+  chafa=$(sed -n 's/^ANIFETCH_CHAFA="\(.*\)"$/\1/p' "$pd" 2>/dev/null) || true
+  loop=$(sed -n 's/^ANIFETCH_LOOP="\(.*\)"$/\1/p'  "$pd" 2>/dev/null) || true
+  # -c 256 on purpose: chafa's colour mode is otherwise a "best guess" from
+  # TERM/COLORTERM, so the same gif renders differently per client and per server.
+  printf '%s\n' \
+    "ANIFETCH_FILE=\"${ANI_FILE:-}\"" \
+    "ANIFETCH_CHAFA=\"${chafa:---symbols block --fg-only -c 256}\"" \
+    "ANIFETCH_LOOP=\"${loop:--1}\"" > "$pd"
   cat >> /etc/profile.d/99-vps-set.sh <<'EOF'
 # --- vps-set shortcuts ---
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
@@ -669,8 +679,10 @@ ani() {
   fi
   # read the current pick from disk, not from whatever this shell sourced hours ago —
   # otherwise `setup.sh fetch` changes the animation and the open shell keeps the old one
-  local name
-  name=$(sed -n 's/^ANIFETCH_FILE="\(.*\)"$/\1/p' /etc/profile.d/99-vps-set.sh 2>/dev/null)
+  local cfg=/etc/profile.d/99-vps-set.sh name chafa loop
+  name=$(sed -n  's/^ANIFETCH_FILE="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
+  chafa=$(sed -n 's/^ANIFETCH_CHAFA="\(.*\)"$/\1/p' "$cfg" 2>/dev/null)
+  loop=$(sed -n  's/^ANIFETCH_LOOP="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
   [ -n "$name" ] || name="$ANIFETCH_FILE"
   [ -n "$name" ] || { echo "no animation set — run: sudo setup.sh fetch shell"; return 1; }
   local f="$HOME/.local/share/anifetch/assets/$name"
@@ -686,8 +698,9 @@ ani() {
   # different per client; pin it with ANI_CHAFA="... -c 256".
   # ANI_LOOP: -1 loops forever. Clients that redraw poorly (Termius) lock up if you
   # scroll while it is still animating — give them a finite count.
-  anifetch "$f" -r 10 -W 60 -H 30 -l "${ANI_LOOP:--1}" \
-    -ca "${ANI_CHAFA:---symbols block --fg-only}" --no-input-restore $backend "$@"
+  anifetch "$f" -r 10 -W 60 -H 30 -l "${ANI_LOOP:-${loop:--1}}" \
+    -ca "${ANI_CHAFA:-${chafa:---symbols block --fg-only -c 256}}" \
+    --no-input-restore $backend "$@"
 }
 EOF
   chmod 644 /etc/profile.d/99-vps-set.sh
