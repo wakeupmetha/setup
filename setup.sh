@@ -219,6 +219,17 @@ gif_convert() {
 # Everything in the login panel that needs the network or a slow apt call is
 # refreshed once a day here, never at login.
 fetch_cache_install() {
+  install -d /etc/vps-set
+  # written once, never clobbered by a re-run — these are yours to edit
+  [ -f /etc/vps-set/fetch.conf ] || cat > /etc/vps-set/fetch.conf <<'EOF'
+# Daily speedtest for the login panel, via cloudflare-speed-cli.
+# It moves REAL traffic: roughly link-speed x duration, both ways. On a 1 Gbit
+# node the settings below cost ~500 MB per run, ~15 GB a month. SPEEDTEST=0 off.
+SPEEDTEST=1
+SPEEDTEST_DOWN=3s
+SPEEDTEST_UP=2s
+EOF
+
   cat > /usr/local/bin/vps-set-fetch-cache <<'EOF'
 #!/usr/bin/env bash
 # Cache public IP, geo and pending updates for the login panel.
@@ -233,6 +244,17 @@ ip6=$(get -6 https://ipinfo.io/ip || true)
 # -s upgrade is slow (~1s) but this runs daily in the background, not at login
 upg=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep -c '^Inst ') || upg=0
 sec=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | grep -ci security) || sec=0
+
+# speedtest — real traffic, so it is a knob. --silent would swallow the json too.
+SPEEDTEST=1 SPEEDTEST_DOWN=3s SPEEDTEST_UP=2s
+[ -f /etc/vps-set/fetch.conf ] && . /etc/vps-set/fetch.conf
+st=""
+if [ "${SPEEDTEST:-1}" = 1 ] && command -v cloudflare-speed-cli >/dev/null 2>&1; then
+  st=$(timeout 180 cloudflare-speed-cli --json \
+         --download-duration "${SPEEDTEST_DOWN:-3s}" \
+         --upload-duration "${SPEEDTEST_UP:-2s}" 2>/dev/null) || st=""
+fi
+sj() { [ -n "$st" ] && printf '%s' "$st" | jq -r "$1 // empty" 2>/dev/null; }
 {
   printf 'PUBLIC_IP4=%q\n' "$ip4"
   printf 'PUBLIC_IP6=%q\n' "$ip6"
@@ -243,6 +265,11 @@ sec=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | gre
   printf 'ORG=%q\n'        "$(field org)"
   printf 'UPDATES=%q\n'    "$upg"
   printf 'SECURITY=%q\n'   "$sec"
+  printf 'DOWN_MBPS=%q\n'  "$(sj '.download.mbps'         | cut -d. -f1)"
+  printf 'UP_MBPS=%q\n'    "$(sj '.upload.mbps'           | cut -d. -f1)"
+  printf 'PING_MS=%q\n'    "$(sj '.idle_latency.median_ms' | cut -d. -f1)"
+  printf 'ST_MIB=%q\n'     "$(sj '((.download.bytes // 0) + (.upload.bytes // 0)) / 1048576 | floor')"
+  printf 'ST_AT=%q\n'      "$([ -n "$st" ] && date '+%d.%m %H:%M')"
 } > "$OUT"
 chmod 644 "$OUT"
 EOF
@@ -317,8 +344,10 @@ fastfetch_config() {
       "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; now=$(date \"+%H:%M %Z\"); srv=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null); if [ -n \"${TIMEZONE:-}\" ] && [ \"$TIMEZONE\" != \"$srv\" ]; then echo \"$now  |  $(TZ=$TIMEZONE date \"+%H:%M\") ${TIMEZONE##*/}\"; else echo \"$now\"; fi"
     },
     {
-      "type": "shell",
-      "key": ""
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "s=${SHELL:-$(getent passwd \"$(id -un)\" | cut -d: -f7)}; v=$(\"$s\" --version 2>/dev/null | head -1 | grep -oE \"[0-9]+\\.[0-9]+(\\.[0-9]+)?\" | head -1); echo \"$s${v:+ $v}\""
     },
     {
       "type": "packages",
@@ -370,6 +399,12 @@ fastfetch_config() {
       "key": "",
       "parallel": true,
       "text": "i=$(ip route show default 2>/dev/null | awk \"{print \\$5; exit}\"); [ -n \"$i\" ] || { echo \"no default route\"; exit 0; }; s=$(cat /sys/class/net/$i/speed 2>/dev/null); awk -v ifc=\"$i\" -v spd=\"$s\" 'function h(b,  u,n){split(\"B KiB MiB GiB TiB\",u,\" \");n=1;while(b>=1024&&n<5){b/=1024;n++}return sprintf(\"%.1f %s\",b,u[n])} $0 ~ \"^ *\"ifc\":\" {sub(/^ *[^:]*: */,\"\"); print ifc (spd>0 ? \" \" spd \"Mb/s\" : \"\") \"  down \" h($1) \"  up \" h($9)}' /proc/net/dev"
+    },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; [ -n \"${DOWN_MBPS:-}\" ] || { echo \"not measured yet\"; exit 0; }; echo \"${DOWN_MBPS} down / ${UP_MBPS} up Mbps  ${PING_MS}ms  (${ST_AT}, ${ST_MIB} MiB used)\""
     },
     "break",
     {
@@ -597,6 +632,47 @@ EOF
   chmod 755 /usr/local/bin/meth-setup
   echo "  meth-setup [section...]  — updates $SCRIPT_DIR and re-runs from anywhere"
 
+  # a real command, not a shell function: works in the shell that just ran setup,
+  # with no `source` and no re-login
+  cat > /usr/local/bin/ani <<'EOF'
+#!/usr/bin/env bash
+# animated neofetch. `ani --fresh` throws the frame cache away first: anifetch calls
+# ffmpeg without -y, so it will not overwrite frames left by an interrupted render.
+ani() {
+  if [ "${1:-}" = "--fresh" ]; then
+    shift
+    find "$HOME/.local/share/anifetch" -maxdepth 1 -type d \
+      -regextype posix-extended -regex '.*/[0-9a-f]{64}' -exec rm -rf {} + 2>/dev/null
+    set -- -fr "$@"
+  fi
+  # read the current pick from disk, not from whatever this shell sourced hours ago —
+  # otherwise `setup.sh fetch` changes the animation and the open shell keeps the old one
+  local cfg=/etc/profile.d/99-vps-set.sh name chafa loop
+  name=$(sed -n  's/^ANIFETCH_FILE="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
+  chafa=$(sed -n 's/^ANIFETCH_CHAFA="\(.*\)"$/\1/p' "$cfg" 2>/dev/null)
+  loop=$(sed -n  's/^ANIFETCH_LOOP="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
+  [ -n "$name" ] || { echo "no animation set — run: sudo setup.sh fetch shell"; exit 1; }
+  local f="$HOME/.local/share/anifetch/assets/$name"
+  [ -f "$f" ] || f="$name"
+  # anifetch drives fastfetch by default; noble ships neofetch instead
+  local backend=""
+  command -v fastfetch >/dev/null || backend="-nf --force"
+  # --no-input-restore: without it anifetch imports pynput on exit to replay your
+  # keystrokes, which needs an X display and blows up on a headless box.
+  # --symbols block: `wide` means full-width CJK glyphs — that is why the animation
+  # comes out as japanese text. Override the lot with ANI_CHAFA=...
+  # chafa's colour depth is a "best guess" from TERM/COLORTERM, so the same gif looks
+  # different per client; pin it with ANI_CHAFA="... -c 256".
+  # ANI_LOOP: -1 loops forever. Clients that redraw poorly (Termius) lock up if you
+  # scroll while it is still animating — give them a finite count.
+  anifetch "$f" -r 10 -W 60 -H 30 -l "${ANI_LOOP:-${loop:--1}}" \
+    -ca "${ANI_CHAFA:-${chafa:---symbols block --fg-only -c 256}}" \
+    --no-input-restore $backend "$@"
+}
+ani "$@"
+EOF
+  chmod 755 /usr/local/bin/ani
+
   log "shortcuts -> /etc/profile.d/99-vps-set.sh"
   # $ANI_FILE is set by the fetch section; running `shell` on its own must not wipe
   # the animation, so recover it from the file we are about to overwrite.
@@ -680,46 +756,23 @@ alias ...='cd ../..'
 alias df='df -hT -x tmpfs -x devtmpfs'
 alias free='free -h'
 
-# animated neofetch.  `ani --fresh` throws the frame cache away first: anifetch calls
-# ffmpeg without -y, so it will not overwrite frames left behind by an interrupted
-# render, and -fr alone keeps replaying the broken ones.
-ani() {
-  if [ "${1:-}" = "--fresh" ]; then
-    shift
-    find "$HOME/.local/share/anifetch" -maxdepth 1 -type d \
-      -regextype posix-extended -regex '.*/[0-9a-f]{64}' -exec rm -rf {} + 2>/dev/null
-    set -- -fr "$@"
-  fi
-  # read the current pick from disk, not from whatever this shell sourced hours ago —
-  # otherwise `setup.sh fetch` changes the animation and the open shell keeps the old one
-  local cfg=/etc/profile.d/99-vps-set.sh name chafa loop
-  name=$(sed -n  's/^ANIFETCH_FILE="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
-  chafa=$(sed -n 's/^ANIFETCH_CHAFA="\(.*\)"$/\1/p' "$cfg" 2>/dev/null)
-  loop=$(sed -n  's/^ANIFETCH_LOOP="\(.*\)"$/\1/p'  "$cfg" 2>/dev/null)
-  [ -n "$name" ] || name="$ANIFETCH_FILE"
-  [ -n "$name" ] || { echo "no animation set — run: sudo setup.sh fetch shell"; return 1; }
-  local f="$HOME/.local/share/anifetch/assets/$name"
-  [ -f "$f" ] || f="$name"
-  # anifetch drives fastfetch by default; noble ships neofetch instead
-  local backend=""
-  command -v fastfetch >/dev/null || backend="-nf --force"
-  # --no-input-restore: without it anifetch imports pynput on exit to replay your
-  # keystrokes, which needs an X display and blows up on a headless box.
-  # --symbols block: `wide` means full-width CJK glyphs — that is why the animation
-  # comes out as japanese text. Override the lot with ANI_CHAFA=...
-  # chafa's colour depth is a "best guess" from TERM/COLORTERM, so the same gif looks
-  # different per client; pin it with ANI_CHAFA="... -c 256".
-  # ANI_LOOP: -1 loops forever. Clients that redraw poorly (Termius) lock up if you
-  # scroll while it is still animating — give them a finite count.
-  anifetch "$f" -r 10 -W 60 -H 30 -l "${ANI_LOOP:-${loop:--1}}" \
-    -ca "${ANI_CHAFA:-${chafa:---symbols block --fg-only -c 256}}" \
-    --no-input-restore $backend "$@"
-}
 EOF
   chmod 644 /etc/profile.d/99-vps-set.sh
-  # profile.d is read at login, so the shell running this one still has none of it
-  echo "  ani / ip / ipv6 / ports / speedtest ready — this shell won't see them until:"
-  echo "      source /etc/profile.d/99-vps-set.sh    (or just re-login)"
+
+  # render the frames now, so the first `ani` shows the animation instead of sitting
+  # through an ffmpeg pass
+  if [ -x "$TARGET_HOME/.local/bin/anifetch" ] && [ -n "$ANI_FILE" ]; then
+    step "pre-rendering $ANI_FILE" ani_warm
+  fi
+
+  echo "  ani works right now — it is a command, not a shell function"
+  # the rest are functions/aliases, and profile.d is only read at login
+  echo "  ip / ipv6 / ports / ff / speedtest need: source /etc/profile.d/99-vps-set.sh"
+}
+
+ani_warm() {
+  timeout 300 sudo -u "$TARGET_USER" -H \
+    env ANI_LOOP=1 PATH="$TARGET_HOME/.local/bin:$PATH" /usr/local/bin/ani >/dev/null 2>&1 || true
 }
 
 # --- firewall -----------------------------------------------------------
