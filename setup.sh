@@ -639,6 +639,12 @@ EOF
 # animated neofetch. `ani --fresh` throws the frame cache away first: anifetch calls
 # ffmpeg without -y, so it will not overwrite frames left by an interrupted render.
 ani() {
+  # pipx installs anifetch into ~/.local/bin, and that lands on PATH only when
+  # profile.d is read at login — a standalone script has to add it itself
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+  command -v anifetch >/dev/null || {
+    echo "anifetch not installed — run: sudo setup.sh fetch"; exit 1; }
+
   if [ "${1:-}" = "--fresh" ]; then
     shift
     find "$HOME/.local/share/anifetch" -maxdepth 1 -type d \
