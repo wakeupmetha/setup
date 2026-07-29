@@ -947,14 +947,19 @@ container_ports() {
       continue
     fi
     for p in $ports; do
+      # A database published on 0.0.0.0 was reachable from the internet before
+      # ufw-docker existed, because docker bypassed ufw entirely. Closing it is the
+      # whole point of installing ufw-docker, so these do NOT get an automatic rule.
+      case "${p%%/*}" in
+        5432|3306|27017|6379|9200|11211|5984|9042|1433|5672)
+          warn "$c publishes $p on 0.0.0.0 — a database/cache open to the internet. Left CLOSED."
+          echo  "      keep it closed properly:  edit the compose file to -p 127.0.0.1:${p%%/*}:${p%%/*}"
+          echo  "      or reopen it to the world: ufw-docker allow $c $p"
+          continue ;;
+      esac
       ufw-docker allow "$c" "$p" >/dev/null 2>&1 \
         && echo "  ufw-docker allow $c $p" \
         || warn "ufw-docker allow $c $p failed — run it by hand"
-      # these were already world-reachable before ufw-docker; say so out loud
-      case "${p%%/*}" in
-        5432|3306|27017|6379|9200|11211|5984|9042)
-          warn "$c publishes $p to 0.0.0.0 — that is a database/cache facing the internet. Republish it as -p 127.0.0.1:${p%%/*}:${p%%/*} and drop the rule: ufw-docker delete allow $c $p" ;;
-      esac
     done
   done
 }
