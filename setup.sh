@@ -239,6 +239,7 @@ sec=$(apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | gre
   printf 'CITY=%q\n'       "$(field city)"
   printf 'REGION=%q\n'     "$(field region)"
   printf 'COUNTRY=%q\n'    "$(field country)"
+  printf 'TIMEZONE=%q\n'   "$(field timezone)"
   printf 'ORG=%q\n'        "$(field org)"
   printf 'UPDATES=%q\n'    "$upg"
   printf 'SECURITY=%q\n'   "$sec"
@@ -310,6 +311,12 @@ fastfetch_config() {
       "key": ""
     },
     {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; now=$(date \"+%H:%M %Z\"); srv=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null); if [ -n \"${TIMEZONE:-}\" ] && [ \"$TIMEZONE\" != \"$srv\" ]; then echo \"$now  |  $(TZ=$TIMEZONE date \"+%H:%M\") ${TIMEZONE##*/}\"; else echo \"$now\"; fi"
+    },
+    {
       "type": "shell",
       "key": ""
     },
@@ -357,6 +364,12 @@ fastfetch_config() {
       "key": "",
       "parallel": true,
       "text": "[ -f /var/cache/vps-set/fetch.env ] && . /var/cache/vps-set/fetch.env; echo \"${CITY:-?}, ${COUNTRY:-?} - $(echo \"${ORG:-?}\" | cut -c1-28)\""
+    },
+    {
+      "type": "command",
+      "key": "",
+      "parallel": true,
+      "text": "i=$(ip route show default 2>/dev/null | awk \"{print \\$5; exit}\"); [ -n \"$i\" ] || { echo \"no default route\"; exit 0; }; s=$(cat /sys/class/net/$i/speed 2>/dev/null); awk -v ifc=\"$i\" -v spd=\"$s\" 'function h(b,  u,n){split(\"B KiB MiB GiB TiB\",u,\" \");n=1;while(b>=1024&&n<5){b/=1024;n++}return sprintf(\"%.1f %s\",b,u[n])} $0 ~ \"^ *\"ifc\":\" {sub(/^ *[^:]*: */,\"\"); print ifc (spd>0 ? \" \" spd \"Mb/s\" : \"\") \"  down \" h($1) \"  up \" h($9)}' /proc/net/dev"
     },
     "break",
     {
