@@ -672,6 +672,7 @@ ani() {
 ani "$@"
 EOF
   chmod 755 /usr/local/bin/ani
+  ani_unshadow
 
   log "shortcuts -> /etc/profile.d/99-vps-set.sh"
   # $ANI_FILE is set by the fetch section; running `shell` on its own must not wipe
@@ -768,6 +769,24 @@ EOF
   echo "  ani works right now — it is a command, not a shell function"
   # the rest are functions/aliases, and profile.d is only read at login
   echo "  ip / ipv6 / ports / ff / speedtest need: source /etc/profile.d/99-vps-set.sh"
+}
+
+# A hand-written ani() in a dotfile wins over /usr/local/bin/ani and silently keeps
+# running the old flags — comment it out rather than leave the command shadowed.
+ani_unshadow() {
+  local f
+  for f in "$TARGET_HOME/.bashrc" "$TARGET_HOME/.bash_aliases" "$TARGET_HOME/.zshrc" /etc/bash.bashrc; do
+    [ -f "$f" ] || continue
+    grep -qE '^[[:space:]]*(ani\(\)|function ani|alias ani=)' "$f" || continue
+    cp "$f" "$f.vps-set.bak"
+    awk '
+      /^[[:space:]]*(ani\(\)|function ani)/ { inf = 1 }
+      inf { print "# vps-set: " $0; if ($0 ~ /^[[:space:]]*}[[:space:]]*$/) inf = 0; next }
+      /^[[:space:]]*alias ani=/ { print "# vps-set: " $0; next }
+      { print }
+    ' "$f.vps-set.bak" > "$f"
+    warn "commented out an old ani in $f (backup: $f.vps-set.bak) — it shadowed /usr/local/bin/ani"
+  done
 }
 
 ani_warm() {
@@ -920,16 +939,22 @@ container_ports() {
       printf '  %-16s network=host — covered by the ufw rules above\n' "$c"
       continue
     fi
-    # read what it actually published instead of guessing: "0.0.0.0:443->443/tcp"
-    ports=$(docker inspect -f '{{range $p, $c := .NetworkSettings.Ports}}{{if $c}}{{$p}} {{end}}{{end}}' "$c" 2>/dev/null || true)
+    # only bindings that face the world. A port published as -p 127.0.0.1:5432:5432 is
+    # not reachable from outside and must not get a rule.
+    ports=$(docker inspect -f '{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{if or (eq .HostIp "0.0.0.0") (eq .HostIp "::") (eq .HostIp "")}}{{$p}} {{end}}{{end}}{{end}}' "$c" 2>/dev/null | tr ' ' '\n' | sort -u | tr '\n' ' ' || true)
     if [ -z "$ports" ]; then
-      printf '  %-16s network=%s, nothing published\n' "$c" "$mode"
+      printf '  %-16s network=%s, nothing public\n' "$c" "$mode"
       continue
     fi
     for p in $ports; do
       ufw-docker allow "$c" "$p" >/dev/null 2>&1 \
         && echo "  ufw-docker allow $c $p" \
         || warn "ufw-docker allow $c $p failed — run it by hand"
+      # these were already world-reachable before ufw-docker; say so out loud
+      case "${p%%/*}" in
+        5432|3306|27017|6379|9200|11211|5984|9042)
+          warn "$c publishes $p to 0.0.0.0 — that is a database/cache facing the internet. Republish it as -p 127.0.0.1:${p%%/*}:${p%%/*} and drop the rule: ufw-docker delete allow $c $p" ;;
+      esac
     done
   done
 }
