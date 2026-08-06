@@ -161,6 +161,11 @@ fastfetch_pkg() {
 # (same `anifetch` command). Needs python >= 3.11.
 anifetch_pkg() {
   as_user pipx uninstall anifetch >/dev/null 2>&1 || true
+  # pip burns 5 retries x 15s against an index it cannot reach, then reports the useless
+  # "from versions: none". One 8s probe fails the step in a breath and says the truth.
+  # Probes the index only — a dead files.pythonhosted.org still falls through to pip.
+  curl -fsS --max-time 8 -o /dev/null https://pypi.org/simple/anifetch-cli/ \
+    || { echo "pypi.org unreachable from this box"; return 1; }
   # no `|| pipx upgrade` fallback: install already exits 0 when it's present, so the
   # fallback only ever ran after a real failure and buried it under "not installed".
   as_user pipx install anifetch-cli
@@ -175,7 +180,7 @@ fetch_install() {
   # cosmetic: a wedged pipx or unreachable PyPI must not abort docker/ssh/shell after it.
   # Everything downstream already guards on anifetch being missing; verify reports MISS.
   step "anifetch" anifetch_pkg \
-    || warn "anifetch skipped — pip log: $TARGET_HOME/.local/state/pipx/log/ (needs python >= 3.11)"
+    || warn "anifetch skipped, ani will not work — why in $LOGFILE. Retry later: sudo $0 fetch"
   step "login panel + daily cache" fetch_panel
   echo "  panel keys are Nerd Font glyphs — install one in your LOCAL terminal, or they render as boxes"
 
