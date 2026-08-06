@@ -161,7 +161,9 @@ fastfetch_pkg() {
 # (same `anifetch` command). Needs python >= 3.11.
 anifetch_pkg() {
   as_user pipx uninstall anifetch >/dev/null 2>&1 || true
-  as_user pipx install anifetch-cli || as_user pipx upgrade anifetch-cli
+  # no `|| pipx upgrade` fallback: install already exits 0 when it's present, so the
+  # fallback only ever ran after a real failure and buried it under "not installed".
+  as_user pipx install anifetch-cli
 }
 
 fetch_install() {
@@ -170,7 +172,10 @@ fetch_install() {
   # --no-install-recommends: ffmpeg otherwise drags in ~100 MB of mesa/gtk/vulkan
   # drivers that are useless on a headless VPS.
   step "chafa + ffmpeg" apt-get install -y -qq --no-install-recommends chafa ffmpeg
-  step "anifetch" anifetch_pkg
+  # cosmetic: a wedged pipx or unreachable PyPI must not abort docker/ssh/shell after it.
+  # Everything downstream already guards on anifetch being missing; verify reports MISS.
+  step "anifetch" anifetch_pkg \
+    || warn "anifetch skipped — pip log: $TARGET_HOME/.local/state/pipx/log/ (needs python >= 3.11)"
   step "login panel + daily cache" fetch_panel
   echo "  panel keys are Nerd Font glyphs — install one in your LOCAL terminal, or they render as boxes"
 
